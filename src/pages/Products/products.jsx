@@ -53,7 +53,6 @@ import { URL } from "../../config/config";
 import AddPhotoAlternateIcon from '@mui/icons-material/AddPhotoAlternate';
 import Modal from '@mui/material/Modal';
 
-
 const style = {
   position: 'absolute',
   top: '50%',
@@ -64,7 +63,6 @@ const style = {
   border: '2px solid #000',
   boxShadow: 24,
   p: 4,
-
 };
 
 export default function Products() {
@@ -79,13 +77,22 @@ export default function Products() {
   const [priceRange, setPriceRange] = useState([0, 1000]);
   const [selectedCategories, setSelectedCategories] = useState([]);
 
-  const data = useSelector((store) => store.product.data);
+  // Modal states
+  const [open, setOpen] = useState(false);
+  const [open2, setOpen2] = useState(false);
+  const [idx, setIdx] = useState(null);
+  const [imgFile, setImgFile] = useState("");
+
+  const data = useSelector((store) => store.product.data) || [];
+  console.log(data,"all");
+  
   const brandId = useSelector((store) => store.product.brandId);
+  const imgs = useSelector((store) => store.product.getById);
   const dispatch = useDispatch();
 
   const handleSelectAll = (event) => {
     if (event.target.checked) {
-      setSelected(data?.map((product) => product.id) || []);
+      setSelected(data.map((product) => product.id) || []);
     } else {
       setSelected([]);
     }
@@ -125,129 +132,169 @@ export default function Products() {
   };
 
   const handleDeleteSelected = () => {
-    selected.forEach(id => {
+    // Create a copy to avoid mutation during iteration
+    const itemsToDelete = [...selected];
+    itemsToDelete.forEach(id => {
       dispatch(deleteProduct(id));
     });
     setSelected([]);
   };
 
-  const filteredProducts = data?.filter(product =>
-    product.productName.toLowerCase().includes(searchTerm.toLowerCase()) &&
-    (selectedCategories.length === 0 || selectedCategories.includes(product.categoryName)) &&
-    product.price >= priceRange[0] && product.price <= priceRange[1]
-  );
+  // Modal handlers
+  const handleOpen = (productId) => {
+    setIdx(productId);
+    setOpen(true);
+  };
+  
+  const handleClose = () => {
+    setOpen(false);
+    setImgFile(""); // Reset image state
+  };
 
-  const sortedProducts = [...(filteredProducts || [])].sort((a, b) => {
-    if (sortBy === "Price") {
-      return sortDirection === "asc" ? a.price - b.price : b.price - a.price;
-    } else if (sortBy === "Newest") {
-      // Assuming id correlates with creation date
-      return sortDirection === "asc" ? a.id - b.id : b.id - a.id;
-    }
-    return 0;
-  });
+  const handleOpen2 = (productId) => {
+    dispatch(getProductById(productId));
+    setOpen2(true);
+  };
+  
+  const handleClose2 = () => {
+    setOpen2(false);
+  };
 
-  // Get unique categories from data
-  const categories = [...new Set(data?.map(product => product.categoryName))];
-
-
-  // addImageModal
-
-  const [open, setOpen] = React.useState(false);
-  const handleOpen = () => setOpen(true);
-  const handleClose = () => setOpen(false);
-  const [idx, setIdx] = useState(null)
-  const [imgFile, setImgFile] = useState("")
+  const handleDeleteImage = (imageId) => {
+    dispatch(deleteProductImg(imageId)).then(() => {
+      // Refresh product details
+      if (idx) {
+        dispatch(getProductById(idx));
+      }
+    });
+    handleClose2();
+  };
 
   function addImage() {
-    const imgFormData = new FormData()
-    imgFormData.append("ProductId", idx)
+    if (!imgFile || !idx) return;
+    
+    const imgFormData = new FormData();
+    imgFormData.append("ProductId", idx);
+    
     for (let i = 0; i < imgFile.length; i++) {
-      imgFormData.append("Files", imgFile[i])
+      imgFormData.append("Files", imgFile[i]);
     }
-    dispatch(addProductImg(imgFormData))
-    handleClose()
+    
+    dispatch(addProductImg(imgFormData)).then(() => {
+      // Refresh product list
+      dispatch(getProducts());
+    });
+    
+    handleClose();
   }
 
+  // Filter products
+  const filteredProducts = React.useMemo(() => {
+    return data.filter(product =>
+      product.productName.toLowerCase().includes(searchTerm.toLowerCase()) &&
+      (selectedCategories.length === 0 || selectedCategories.includes(product.categoryName)) &&
+      product.price >= priceRange[0] && product.price <= priceRange[1]
+    );
+  }, [data, searchTerm, selectedCategories, priceRange]);
 
-  //deleteProductImage
+  // Sort products
+  const sortedProducts = React.useMemo(() => {
+    if (!filteredProducts || filteredProducts.length === 0) return [];
+    
+    return [...filteredProducts].sort((a, b) => {
+      if (sortBy === "Price") {
+        return sortDirection === "asc" ? a.price - b.price : b.price - a.price;
+      } else if (sortBy === "Newest") {
+        return sortDirection === "asc" ? a.id - b.id : b.id - a.id;
+      }
+      return 0;
+    });
+  }, [filteredProducts, sortBy, sortDirection]);
 
-  const [open2, setOpen2] = React.useState(false);
-  const handleOpen2 = () => setOpen2(true);
-  const handleClose2 = () => setOpen2(false);
-  const [images,setImages] =useState("")
-  const imgs =useSelector((store)=>store.product.getById)
-  console.log(imgs);
+  // Get unique categories from data
+  const categories = React.useMemo(() => {
+    return [...new Set(data.filter(product => product?.categoryName).map(product => product.categoryName))];
+  }, [data]);
 
-  
-
-
-
-
+  // Initial data loading
   useEffect(() => {
     setIsLoading(true);
-    dispatch(getProducts()).finally(() => {
-      setTimeout(() => setIsLoading(false), 800);
-    });
+    
+    dispatch(getProducts())
+      .then(() => {
+        setTimeout(() => setIsLoading(false), 800);
+      })
+      .catch((error) => {
+        console.error("Error fetching products:", error);
+        setIsLoading(false);
+      });
   }, [dispatch]);
 
   return (
-
     <>
+      {/* Add Image Modal */}
+      <Modal
+        open={open}
+        onClose={handleClose}
+        aria-labelledby="modal-modal-title"
+        aria-describedby="modal-modal-description"
+      >
+        <Box
+          style={{ display: "flex", flexDirection: "column", gap: "30px" }}
+          sx={style}>
+          <Typography id="modal-modal-title" variant="h6" component="h2">
+            Add New Image To Product
+          </Typography>
+          <input 
+            type="file" 
+            multiple 
+            onChange={(e) => setImgFile(e.target.files)} 
+          />
+          <Button 
+            variant="contained"
+            onClick={addImage}
+            disabled={!imgFile || imgFile.length === 0}
+          >
+            Save Image
+          </Button>
+        </Box>
+      </Modal>
 
-      <div>
-        {/* <Button onClick={handleOpen}>Open modal</Button> */}
-        <Modal
-          open={open}
-          onClose={handleClose}
-          aria-labelledby="modal-modal-title"
-          aria-describedby="modal-modal-description"
-        >
-          <Box
-            style={{ display: "flex", flexDirection: "column", gap: "30px" }}
-            sx={style}>
-            <Typography id="modal-modal-title" variant="h6" component="h2">
-              Add New Image To Product
-            </Typography>
-            <input type="file" multiple onChange={(e) => setImgFile(e.target.files)} />
-            <Button variant="contained"
-              onClick={() => addImage()}
-            >Save Image</Button>
-          </Box>
-        </Modal>
-      </div>
-
-
-      {/* deleteProductImage */}
-      <div>
-        <Modal
-          open={open2}
-          onClose={handleClose2}
-          aria-labelledby="modal-modal-title"
-          aria-describedby="modal-modal-description"
-        >
-          <Box
-            style={{ display: "flex", flexDirection: "column", gap: "30px" }}
-            sx={style}>
-            <Typography id="modal-modal-title" variant="h6" component="h2">
-              Delete Image From Product
-            </Typography>
+      {/* Delete Image Modal */}
+      <Modal
+        open={open2}
+        onClose={handleClose2}
+        aria-labelledby="modal-modal-title"
+        aria-describedby="modal-modal-description"
+      >
+        <Box
+          style={{ display: "flex", flexDirection: "column", gap: "30px" }}
+          sx={style}>
+          <Typography id="modal-modal-title" variant="h6" component="h2">
+            Delete Image From Product
+          </Typography>
           <Box>
-          {imgs?.images?.map((e)=>{
-            return (
-              <div key={e.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                <img 
-                style={{width:"80px",marginTop:"10px"}}
-                src={URL+"/images/"+e.images} alt="" />
-                <Delete onClick={()=>{dispatch(deleteProductImg(e.id)),handleClose2()}}/>
-              </div>
-            )
-           })}
+            {imgs?.images && imgs.images.length > 0 ? (
+              imgs.images.map((e) => (
+                <div key={e.id} style={{display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom: "10px"}}>
+                  <img 
+                    style={{width:"80px"}}
+                    src={URL+"/images/"+e.images} 
+                    alt="Product" 
+                  />
+                  <IconButton onClick={() => handleDeleteImage(e.id)} color="error">
+                    <Delete />
+                  </IconButton>
+                </div>
+              ))
+            ) : (
+              <Typography variant="body2" color="text.secondary">
+                No images available
+              </Typography>
+            )}
           </Box>
-          </Box>
-        </Modal>
-      </div>
-
+        </Box>
+      </Modal>
 
       <Paper
         sx={{
@@ -427,7 +474,7 @@ export default function Products() {
               <Box sx={{ minWidth: 200 }}>
                 <Typography variant="caption">Categories</Typography>
                 <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, mt: 0.5 }}>
-                  {categories?.map(category => (
+                  {categories.map(category => (
                     <Chip
                       key={category}
                       label={category}
@@ -452,7 +499,7 @@ export default function Products() {
         </Collapse>
 
         {/* Empty State */}
-        {!data?.length && !isLoading && (
+        {(!data || data.length === 0) && !isLoading && (
           <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', py: 6 }}>
             <Box
               sx={{
@@ -481,7 +528,7 @@ export default function Products() {
         )}
 
         {/* Table View */}
-        {viewMode === "table" && data?.length > 0 && (
+        {viewMode === "table" && sortedProducts.length > 0 && (
           <TableContainer sx={{
             borderRadius: 2,
             boxShadow: '0 2px 8px rgba(0,0,0,0.05)',
@@ -494,8 +541,8 @@ export default function Products() {
                 <TableRow>
                   <TableCell padding="checkbox">
                     <Checkbox
-                      indeterminate={selected?.length > 0 && selected?.length < sortedProducts?.length}
-                      checked={sortedProducts?.length > 0 && selected?.length === sortedProducts?.length}
+                      indeterminate={selected.length > 0 && selected.length < sortedProducts.length}
+                      checked={sortedProducts.length > 0 && selected.length === sortedProducts.length}
                       onChange={handleSelectAll}
                     />
                   </TableCell>
@@ -507,7 +554,7 @@ export default function Products() {
                 </TableRow>
               </TableHead>
               <TableBody>
-                {sortedProducts?.map((el) => (
+                {data.map((el) => (
                   <TableRow
                     key={el.id}
                     hover
@@ -530,11 +577,11 @@ export default function Products() {
                     <TableCell>
                       <Box sx={{ display: "flex", alignItems: "center", gap: 2 }}>
                         <Avatar
-                        onClick={()=>{handleOpen2(),dispatch(getProductById(el.id))}}
                           variant="rounded"
                           src={`${URL}/images/${el.image}`}
                           alt={el.productName}
-                          sx={{ width: 50, height: 50, borderRadius: 2, boxShadow: '0 2px 8px rgba(0,0,0,0.1)' }}
+                          sx={{ width: 50, height: 50, borderRadius: 2, boxShadow: '0 2px 8px rgba(0,0,0,0.1)', cursor: 'pointer' }}
+                          onClick={() => handleOpen2(el.id)}
                         />
                         <Box>
                           <Typography variant="body2" sx={{ fontWeight: 500 }}>{el.productName}</Typography>
@@ -580,9 +627,9 @@ export default function Products() {
                     <TableCell>
                       <Box sx={{ display: "flex", flexDirection: "column" }}>
                         <Typography variant="body2" sx={{ fontWeight: 600 }}>
-                          ${el.price.toFixed(2)}
+                          ${el.price?.toFixed(2) || '0.00'}
                         </Typography>
-                        {el.hasDiscount && (
+                        {el.hasDiscount && el.discountPrice && (
                           <Typography variant="caption" color="error" sx={{ textDecoration: "line-through" }}>
                             ${el.discountPrice.toFixed(2)}
                           </Typography>
@@ -591,19 +638,21 @@ export default function Products() {
                     </TableCell>
                     <TableCell align="right">
                       <Box sx={{ display: 'flex', justifyContent: 'flex-end', gap: 0.5 }}>
-                        <Tooltip title="View Details">
-                          <IconButton size="small" sx={{ color: '#3a7bd5' }}>
-                            <AddPhotoAlternateIcon
-                              onClick={() => { handleOpen(), setIdx(el.id) }}
-                              fontSize="small" />
+                        <Tooltip title="Add Images">
+                          <IconButton 
+                            size="small" 
+                            sx={{ color: '#3a7bd5' }}
+                            onClick={() => handleOpen(el.id)}
+                          >
+                            <AddPhotoAlternateIcon fontSize="small" />
                           </IconButton>
                         </Tooltip>
                         <Tooltip title="Edit">
-                          <IconButton size="small" sx={{ color: '#3a7bd5' }}>
-                            <Link to={`/editProduct/${el.id}`} style={{ color: 'inherit' }}>
+                          <Link to={`/editProduct/${el.id}`} style={{ color: 'inherit' }}>
+                            <IconButton size="small" sx={{ color: '#3a7bd5' }}>
                               <Edit fontSize="small" />
-                            </Link>
-                          </IconButton>
+                            </IconButton>
+                          </Link>
                         </Tooltip>
                         <Tooltip title="Delete">
                           <IconButton
@@ -624,9 +673,9 @@ export default function Products() {
         )}
 
         {/* Grid View */}
-        {viewMode === "grid" && data?.length > 0 && (
+        {viewMode === "grid" && sortedProducts.length > 0 && (
           <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(250px, 1fr))', gap: 3 }}>
-            {sortedProducts?.map((product) => (
+            {sortedProducts.map((product) => (
               <Card
                 key={product.id}
                 sx={{
@@ -661,8 +710,10 @@ export default function Products() {
                     position: 'relative',
                     borderRadius: '8px 8px 0 0',
                     overflow: 'hidden',
-                    bgcolor: 'rgba(0,0,0,0.04)'
+                    bgcolor: 'rgba(0,0,0,0.04)',
+                    cursor: 'pointer'
                   }}
+                  onClick={() => handleOpen2(product.id)}
                 >
                   <Avatar
                     variant="square"
@@ -725,9 +776,9 @@ export default function Products() {
 
                     <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
                       <Typography variant="subtitle2" sx={{ fontWeight: 600, color: '#3a7bd5' }}>
-                        ${product.price.toFixed(2)}
+                        ${product.price?.toFixed(2) || '0.00'}
                       </Typography>
-                      {product.hasDiscount && (
+                      {product.hasDiscount && product.discountPrice && (
                         <Typography variant="caption" color="error" sx={{ textDecoration: "line-through" }}>
                           ${product.discountPrice.toFixed(2)}
                         </Typography>
@@ -736,7 +787,7 @@ export default function Products() {
                   </Box>
 
                   <Box sx={{ display: 'flex', gap: 1 }}>
-                    <Tooltip title="View Details">
+                    <Tooltip title="Add Images">
                       <IconButton
                         size="small"
                         sx={{
@@ -745,8 +796,9 @@ export default function Products() {
                           border: '1px solid rgba(0,0,0,0.12)',
                           borderRadius: 1
                         }}
+                        onClick={() => handleOpen(product.id)}
                       >
-                        <Visibility fontSize="small" />
+                        <AddPhotoAlternateIcon fontSize="small" />
                       </IconButton>
                     </Tooltip>
 
